@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/gographics/imagick/imagick"
 	"github.com/ncw/swift"
 	"image"
@@ -21,8 +22,6 @@ type connectionInfo struct {
 	Tenant   string `json:"tenant"`
 	UserName string `json:"username"`
 }
-
-var c swift.Connection
 
 func resizeFile(file []byte, width uint, height uint) (image.Image, string) {
 
@@ -103,6 +102,28 @@ func loadConfig() connectionInfo {
 	return config
 }
 
+func uploadHandler(w http.ResponseWriter, r *http.Request, c swift.Connection) {
+
+	log.Println("requesting upload")
+
+	image, err := ioutil.ReadAll(r.Body)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	filename := r.URL.Query().Get("filename")
+
+	filetype := http.DetectContentType(image)
+
+	fmt.Println(filetype)
+
+	c.ObjectPutBytes("test-resize", filename, image, filetype)
+
+	fmt.Fprintf(w, "Received file, uploaded")
+
+}
+
 func main() {
 
 	config := loadConfig()
@@ -138,6 +159,9 @@ func main() {
 	log.Println("Starting server")
 
 	http.HandleFunc("/resize", resizeHandler)
+	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		uploadHandler(w, r, c)
+	})
 	http.ListenAndServe(":4500", nil)
 
 	log.Println("Server stopped")
