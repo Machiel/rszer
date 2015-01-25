@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
-	"github.com/nfnt/resize"
+	"encoding/json"
+	"fmt"
+	"github.com/gographics/imagick/imagick"
+	"github.com/ncw/swift"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -13,17 +16,41 @@ import (
 	"strconv"
 )
 
-func resizeFile(file *bytes.Buffer, width uint, height uint) (image.Image, string) {
+type connectionInfo struct {
+	ApiKey   string `json:"api_key"`
+	AuthURL  string `json:"auth_url"`
+	Tenant   string `json:"tenant"`
+	UserName string `json:"username"`
+}
 
-	img, format, err := image.Decode(file)
+func resizeFile(file []byte, width uint, height uint) (image.Image, string) {
+
+	mw := imagick.NewMagickWand()
+	defer mw.Destroy()
+
+	err := mw.ReadImageBlob(file)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	m := resize.Resize(width, height, img, resize.NearestNeighbor)
+	err = mw.ResizeImage(width, height, imagick.FILTER_LANCZOS, 1.0)
 
-	return m, format
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = mw.SetImageCompressionQuality(95)
+
+	blob := mw.GetImageBlob()
+
+	image, format, err := image.Decode(bytes.NewBuffer(blob))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return image, format
 }
 
 func resizeHandler(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +79,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Requested resize, width %d, height %d", width, height)
 
-	result, format := resizeFile(bytes.NewBuffer(image), uint(width), uint(height))
+	result, format := resizeFile(image, uint(width), uint(height))
 
 	if format == "jpeg" {
 		jpeg.Encode(w, result, &jpeg.Options{Quality: 90})
@@ -63,11 +90,78 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func loadConfig() connectionInfo {
+	configJSON, err := ioutil.ReadFile("config.json")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var config connectionInfo
+	err = json.Unmarshal(configJSON, &config)
+	return config
+}
+
+func uploadHandler(w http.ResponseWriter, r *http.Request, c swift.Connection) {
+
+	log.Println("requesting upload")
+
+	image, err := ioutil.ReadAll(r.Body)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	filename := r.URL.Query().Get("filename")
+
+	filetype := http.DetectContentType(image)
+
+	fmt.Println(filetype)
+
+	c.ObjectPutBytes("test-resize", filename, image, filetype)
+
+	fmt.Fprintf(w, "Received file, uploaded")
+
+}
+
 func main() {
+
+	config := loadConfig()
+
+	c := swift.Connection{
+		UserName: config.UserName,
+		ApiKey:   config.ApiKey,
+		AuthUrl:  config.AuthURL,
+		Tenant:   config.Tenant,
+	}
+
+	err := c.Authenticate()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// file, err := ioutil.ReadFile("test.jpg")
+
+	// if err != nil {
+	//	log.Fatal(err)
+	// }
+
+	// err = c.ObjectPutBytes("test-resize", "test.jpg", file, "image/jpeg")
+
+	// if err != nil {
+	//	log.Fatal(err)
+	//}
+
+	imagick.Initialize()
+	defer imagick.Terminate()
 
 	log.Println("Starting server")
 
 	http.HandleFunc("/resize", resizeHandler)
+	http.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		uploadHandler(w, r, c)
+	})
 	http.ListenAndServe(":4500", nil)
 
 	log.Println("Server stopped")
