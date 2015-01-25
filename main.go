@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"github.com/nfnt/resize"
+	"github.com/gographics/imagick/imagick"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -13,17 +13,34 @@ import (
 	"strconv"
 )
 
-func resizeFile(file *bytes.Buffer, width uint, height uint) (image.Image, string) {
+func resizeFile(file []byte, width uint, height uint) (image.Image, string) {
 
-	img, format, err := image.Decode(file)
+	mw := imagick.NewMagickWand()
+	defer mw.Destroy()
+
+	err := mw.ReadImageBlob(file)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	m := resize.Resize(width, height, img, resize.NearestNeighbor)
+	err = mw.ResizeImage(width, height, imagick.FILTER_LANCZOS, 1.0)
 
-	return m, format
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = mw.SetImageCompressionQuality(95)
+
+	blob := mw.GetImageBlob()
+
+	image, format, err := image.Decode(bytes.NewBuffer(blob))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return image, format
 }
 
 func resizeHandler(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +69,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Requested resize, width %d, height %d", width, height)
 
-	result, format := resizeFile(bytes.NewBuffer(image), uint(width), uint(height))
+	result, format := resizeFile(image, uint(width), uint(height))
 
 	if format == "jpeg" {
 		jpeg.Encode(w, result, &jpeg.Options{Quality: 90})
@@ -64,6 +81,9 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	imagick.Initialize()
+	defer imagick.Terminate()
 
 	log.Println("Starting server")
 
