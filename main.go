@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"github.com/gographics/imagick/imagick"
+	"github.com/ncw/swift"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -12,6 +14,15 @@ import (
 	"net/http"
 	"strconv"
 )
+
+type connectionInfo struct {
+	ApiKey   string `json:"api_key"`
+	AuthURL  string `json:"auth_url"`
+	Tenant   string `json:"tenant"`
+	UserName string `json:"username"`
+}
+
+var c swift.Connection
 
 func resizeFile(file []byte, width uint, height uint) (image.Image, string) {
 
@@ -80,7 +91,46 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func loadConfig() connectionInfo {
+	configJSON, err := ioutil.ReadFile("config.json")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var config connectionInfo
+	err = json.Unmarshal(configJSON, &config)
+	return config
+}
+
 func main() {
+
+	config := loadConfig()
+
+	c := swift.Connection{
+		UserName: config.UserName,
+		ApiKey:   config.ApiKey,
+		AuthUrl:  config.AuthURL,
+		Tenant:   config.Tenant,
+	}
+
+	err := c.Authenticate()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// file, err := ioutil.ReadFile("test.jpg")
+
+	// if err != nil {
+	//	log.Fatal(err)
+	// }
+
+	// err = c.ObjectPutBytes("test-resize", "test.jpg", file, "image/jpeg")
+
+	// if err != nil {
+	//	log.Fatal(err)
+	//}
 
 	imagick.Initialize()
 	defer imagick.Terminate()
